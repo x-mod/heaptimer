@@ -25,9 +25,9 @@ func TestTimer_Push(t *testing.T) {
 		<-timer.Close()
 	}()
 	//method 1
-	for i := range timer.C {
-		log.Println("pop:", i)
-	}
+	// for i := range timer.C {
+	// 	log.Println("pop:", i)
+	// }
 	//method 2
 	// for {
 	// 	if i, ok := timer.Pop(); ok {
@@ -36,5 +36,13 @@ func TestTimer_Push(t *testing.T) {
 	// 		break
 	// 	}
 	// }
+	for {
+		if v := timer.Drain(); v != nil {
+			log.Println("drain:", v)
+		} else {
+			break
+		}
+	}
+
 	log.Println("timer closed")
 }

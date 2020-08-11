@@ -35,7 +35,8 @@ func (tm *Timer) Pop() (interface{}, bool) {
 
 func (tm *Timer) Drain() interface{} {
 	if tm.heap.Len() > 0 {
-		return heap.Pop(tm.heap)
+		node := heap.Pop(tm.heap).(*Node)
+		return node.value
 	}
 	return nil
 }
