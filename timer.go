@@ -33,6 +33,13 @@ func (tm *Timer) Pop() (interface{}, bool) {
 	return val, ok
 }
 
+func (tm *Timer) Drain() interface{} {
+	if tm.heap.Len() > 0 {
+		return heap.Pop(tm.heap)
+	}
+	return nil
+}
+
 func (tm *Timer) Push(val interface{}, duration time.Duration) {
 	node := &Node{value: val, tm: time.Now().Add(duration)}
 	tm.heap.Push(node)
