@@ -42,6 +42,15 @@ func (tm *Timer) Push(val interface{}, duration time.Duration) {
 	}
 }
 
+func (tm *Timer) PushByTime(val interface{}, t time.Time) {
+	node := &Node{value: val, tm: t}
+	tm.heap.Push(node)
+	head := tm.heap.Head()
+	if head.tm.After(time.Now()) {
+		tm.timer.Reset(head.tm.Sub(time.Now()))
+	}
+}
+
 func (tm *Timer) Serve(ctx context.Context) error {
 	defer tm.stopped.Fire()
 	for {
