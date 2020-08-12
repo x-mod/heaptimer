@@ -86,7 +86,10 @@ func (tm *Timer) Serve(ctx context.Context) (err error) {
 			return ctx.Err()
 		case <-tm.close.Done():
 			return nil
-		case <-tm.timer.C:
+		case _, ok := <-tm.timer.C:
+			if !ok { // timer closed
+				return nil
+			}
 			d := tm.duration
 			head := tm.heap.Head()
 			for head != nil && head.tm.Before(time.Now()) {
