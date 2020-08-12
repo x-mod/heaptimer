@@ -3,6 +3,7 @@ package heaptimer
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/x-mod/event"
@@ -17,15 +18,27 @@ type Timer struct {
 	stopped  *event.Event
 }
 
-func New(duration time.Duration) *Timer {
-	return &Timer{
+type Opt func(*Timer)
+
+func Duration(d time.Duration) Opt {
+	return func(tm *Timer) {
+		tm.duration = d
+	}
+}
+
+func New(opts ...Opt) *Timer {
+	tm := &Timer{
 		C:        make(chan interface{}),
 		heap:     NewHeap(),
-		duration: duration,
-		timer:    time.NewTimer(duration),
+		duration: time.Millisecond * 500,
 		close:    event.New(),
 		stopped:  event.New(),
 	}
+	for _, opt := range opts {
+		opt(tm)
+	}
+	tm.timer = time.NewTimer(tm.duration)
+	return tm
 }
 
 func (tm *Timer) Pop() (interface{}, bool) {
@@ -41,26 +54,32 @@ func (tm *Timer) Drain() interface{} {
 	return nil
 }
 
-func (tm *Timer) Push(val interface{}, duration time.Duration) {
-	node := &Node{value: val, tm: time.Now().Add(duration)}
-	tm.heap.Push(node)
-	head := tm.heap.Head()
-	if head.tm.After(time.Now()) {
-		tm.timer.Reset(head.tm.Sub(time.Now()))
-	}
-}
-
-func (tm *Timer) PushByTime(val interface{}, t time.Time) {
+func (tm *Timer) Push(val interface{}, t time.Time) {
 	node := &Node{value: val, tm: t}
-	tm.heap.Push(node)
-	head := tm.heap.Head()
-	if head.tm.After(time.Now()) {
+	heap.Push(tm.heap, node)
+	if head := tm.heap.Head(); head.tm.After(time.Now()) {
 		tm.timer.Reset(head.tm.Sub(time.Now()))
 	}
 }
 
-func (tm *Timer) Serve(ctx context.Context) error {
-	defer tm.stopped.Fire()
+func (tm *Timer) PushWithDuration(val interface{}, duration time.Duration) {
+	tm.Push(val, time.Now().Add(duration))
+}
+
+func (tm *Timer) Serve(ctx context.Context) (err error) {
+	defer func() {
+		tm.stopped.Fire()
+		if rc := recover(); rc != nil {
+			switch rv := rc.(type) {
+			case error:
+				err = rv.(error)
+				return
+			default:
+				err = fmt.Errorf("%v", rv)
+				return
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -69,13 +88,15 @@ func (tm *Timer) Serve(ctx context.Context) error {
 			return nil
 		case <-tm.timer.C:
 			d := tm.duration
-			if head := tm.heap.Head(); head != nil {
-				if head.tm.Before(time.Now()) {
-					node := heap.Pop(tm.heap).(*Node)
-					tm.C <- node.value
-				} else {
-					d = head.tm.Sub(time.Now())
-				}
+			head := tm.heap.Head()
+			for head != nil && head.tm.Before(time.Now()) {
+				node := heap.Pop(tm.heap).(*Node)
+				//panic when tm.C closed
+				tm.C <- node.value
+				head = tm.heap.Head()
+			}
+			if head != nil {
+				d = head.tm.Sub(time.Now())
 			}
 			tm.timer.Reset(d)
 		}
