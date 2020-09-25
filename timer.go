@@ -125,6 +125,7 @@ func (tm *Timer) Close() <-chan struct{} {
 	if tm.serving.HasFired() {
 		tm.timer.Stop()
 		close(tm.C)
+		return tm.stopped.Done()
 	}
-	return tm.stopped.Done()
+	return event.Done()
 }
