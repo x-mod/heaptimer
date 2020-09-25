@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/x-mod/event"
@@ -16,6 +17,7 @@ type Timer struct {
 	timer    *time.Timer
 	close    *event.Event
 	stopped  *event.Event
+	mu       sync.Mutex
 }
 
 type Opt func(*Timer)
@@ -47,6 +49,8 @@ func (tm *Timer) Pop() (interface{}, bool) {
 }
 
 func (tm *Timer) Drain() interface{} {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.heap.Len() > 0 {
 		node := heap.Pop(tm.heap).(*Node)
 		return node.value
@@ -55,6 +59,8 @@ func (tm *Timer) Drain() interface{} {
 }
 
 func (tm *Timer) Push(val interface{}, t time.Time) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	node := &Node{value: val, tm: t}
 	heap.Push(tm.heap, node)
 	if head := tm.heap.Head(); head.tm.After(time.Now()) {
@@ -91,19 +97,28 @@ func (tm *Timer) Serve(ctx context.Context) (err error) {
 				return nil
 			}
 			d := tm.duration
-			head := tm.heap.Head()
-			for head != nil && head.tm.Before(time.Now()) {
-				node := heap.Pop(tm.heap).(*Node)
-				//panic when tm.C closed
-				tm.C <- node.value
-				head = tm.heap.Head()
-			}
-			if head != nil {
-				d = head.tm.Sub(time.Now())
+			if nxt, ok := tm.next(); ok {
+				d = nxt
 			}
 			tm.timer.Reset(d)
 		}
 	}
+}
+
+func (tm *Timer) next() (time.Duration, bool) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	head := tm.heap.Head()
+	for head != nil && head.tm.Before(time.Now()) {
+		node := heap.Pop(tm.heap).(*Node)
+		//panic when tm.C closed
+		tm.C <- node.value
+		head = tm.heap.Head()
+	}
+	if head != nil {
+		return head.tm.Sub(time.Now()), true
+	}
+	return 0, false
 }
 
 func (tm *Timer) Close() <-chan struct{} {
