@@ -1,15 +1,18 @@
-package heaptimer
+package main
 
 import (
 	"context"
 	"log"
-	"testing"
 	"time"
+
+	"github.com/x-mod/heaptimer"
 )
 
-func TestTimer_Push(t *testing.T) {
+func main() {
 	log.Println("timer start ...")
-	timer := New(Duration(time.Millisecond * 10))
+	timer := heaptimer.New(
+		heaptimer.Duration(time.Millisecond * 10),
+	)
 	go func() {
 		if err := timer.Serve(context.TODO()); err != nil {
 			log.Println("timer serving failed: ", err)

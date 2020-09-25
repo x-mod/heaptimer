@@ -15,7 +15,7 @@ type Timer struct {
 	heap     *Heap
 	duration time.Duration
 	timer    *time.Timer
-	close    *event.Event
+	serving  *event.Event
 	stopped  *event.Event
 	mu       sync.Mutex
 }
@@ -33,7 +33,7 @@ func New(opts ...Opt) *Timer {
 		C:        make(chan interface{}),
 		heap:     NewHeap(),
 		duration: time.Millisecond * 500,
-		close:    event.New(),
+		serving:  event.New(),
 		stopped:  event.New(),
 	}
 	for _, opt := range opts {
@@ -44,6 +44,7 @@ func New(opts ...Opt) *Timer {
 }
 
 func (tm *Timer) Pop() (interface{}, bool) {
+	<-tm.serving.Done()
 	val, ok := <-tm.C
 	return val, ok
 }
@@ -86,12 +87,11 @@ func (tm *Timer) Serve(ctx context.Context) (err error) {
 			}
 		}
 	}()
+	tm.serving.Fire()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-tm.close.Done():
-			return nil
 		case _, ok := <-tm.timer.C:
 			if !ok { // timer closed
 				return nil
@@ -122,8 +122,9 @@ func (tm *Timer) next() (time.Duration, bool) {
 }
 
 func (tm *Timer) Close() <-chan struct{} {
-	close(tm.C)
-	tm.timer.Stop()
-	tm.close.Fire()
+	if tm.serving.HasFired() {
+		tm.timer.Stop()
+		close(tm.C)
+	}
 	return tm.stopped.Done()
 }
