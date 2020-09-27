@@ -127,6 +127,10 @@ func (tm *Timer) next() (time.Duration, bool) {
 	return 0, false
 }
 
+func (tm *Timer) Serving() <-chan struct{} {
+	return tm.serving.Done()
+}
+
 func (tm *Timer) Close() <-chan struct{} {
 	if tm.serving.HasFired() {
 		tm.timer.Stop()
