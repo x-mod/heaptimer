@@ -49,6 +49,12 @@ func (tm *Timer) Pop() (interface{}, bool) {
 	return val, ok
 }
 
+func (tm *Timer) Len() int {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.heap.Len()
+}
+
 func (tm *Timer) Drain() interface{} {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
