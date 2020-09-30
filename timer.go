@@ -3,7 +3,6 @@ package heaptimer
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -17,6 +16,7 @@ type Timer struct {
 	timer    *time.Timer
 	serving  *event.Event
 	stopped  *event.Event
+	close    chan struct{}
 	mu       sync.Mutex
 }
 
@@ -35,6 +35,7 @@ func New(opts ...Opt) *Timer {
 		duration: time.Millisecond * 500,
 		serving:  event.New(),
 		stopped:  event.New(),
+		close:    make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(tm)
@@ -56,9 +57,7 @@ func (tm *Timer) Len() int {
 }
 
 func (tm *Timer) Drain() interface{} {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	if tm.heap.Len() > 0 {
+	if tm.Len() > 0 {
 		node := heap.Pop(tm.heap).(*Node)
 		return node.value
 	}
@@ -80,24 +79,15 @@ func (tm *Timer) PushWithDuration(val interface{}, duration time.Duration) {
 }
 
 func (tm *Timer) Serve(ctx context.Context) (err error) {
-	defer func() {
-		tm.stopped.Fire()
-		if rc := recover(); rc != nil {
-			switch rv := rc.(type) {
-			case error:
-				err = rv.(error)
-				return
-			default:
-				err = fmt.Errorf("%v", rv)
-				return
-			}
-		}
-	}()
+	defer close(tm.C) //close tm.C, make sure the chan closed
+	defer tm.stopped.Fire()
 	tm.serving.Fire()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-tm.close:
+			return nil
 		case _, ok := <-tm.timer.C:
 			if !ok { // timer closed
 				return nil
@@ -133,8 +123,7 @@ func (tm *Timer) Serving() <-chan struct{} {
 
 func (tm *Timer) Close() <-chan struct{} {
 	if tm.serving.HasFired() {
-		tm.timer.Stop()
-		close(tm.C)
+		close(tm.close)
 		return tm.stopped.Done()
 	}
 	return event.Done()

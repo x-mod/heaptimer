@@ -33,17 +33,17 @@ func main() {
 		<-timer.Close()
 	}()
 	// method 1
-	// for i := range timer.C {
-	// 	log.Println("pop:", i)
-	// }
-	// method 2
-	for {
-		if i, ok := timer.Pop(); ok {
-			log.Println("pop:", i)
-		} else {
-			break
-		}
+	for i := range timer.C {
+		log.Println("pop:", i)
 	}
+	// method 2
+	// for {
+	// 	if i, ok := timer.Pop(); ok {
+	// 		log.Println("pop:", i)
+	// 	} else {
+	// 		break
+	// 	}
+	// }
 	// drain
 	for {
 		if v := timer.Drain(); v != nil {
