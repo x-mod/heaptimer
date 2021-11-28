@@ -9,122 +9,106 @@ import (
 	"github.com/x-mod/event"
 )
 
-type Timer struct {
-	C        chan interface{}
-	heap     *Heap
-	duration time.Duration
-	timer    *time.Timer
-	serving  *event.Event
-	stopped  *event.Event
-	close    chan struct{}
-	mu       sync.Mutex
+type HeapTimer struct {
+	heap    *Heap
+	mu      sync.Mutex
+	serving *event.Event
+	stopped *event.Event
+	putting *event.Event
+	ticker  *time.Ticker
+	close   chan struct{}
+	V       chan interface{}
 }
 
-type Opt func(*Timer)
-
-func Duration(d time.Duration) Opt {
-	return func(tm *Timer) {
-		tm.duration = d
+func New() *HeapTimer {
+	return &HeapTimer{
+		heap:    NewHeap(),
+		mu:      sync.Mutex{},
+		serving: event.New(),
+		stopped: event.New(),
+		putting: event.New(),
+		ticker:  nil,
+		close:   make(chan struct{}),
+		V:       make(chan interface{}),
 	}
 }
 
-func New(opts ...Opt) *Timer {
-	tm := &Timer{
-		C:        make(chan interface{}),
-		heap:     NewHeap(),
-		duration: time.Millisecond * 500,
-		serving:  event.New(),
-		stopped:  event.New(),
-		close:    make(chan struct{}),
-	}
-	for _, opt := range opts {
-		opt(tm)
-	}
-	tm.timer = time.NewTimer(tm.duration)
-	return tm
+func (ht *HeapTimer) Push(val interface{}, tm time.Time) {
+	ht.push(&Node{Value: val, ExpireAt: tm})
+	ht.putting.Fire()
 }
 
-func (tm *Timer) Pop() (interface{}, bool) {
-	<-tm.serving.Done()
-	val, ok := <-tm.C
-	return val, ok
+func (ht *HeapTimer) PushWithDuration(val interface{}, d time.Duration) {
+	ht.Push(val, time.Now().Add(d))
 }
 
-func (tm *Timer) Len() int {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	return tm.heap.Len()
+func (ht *HeapTimer) push(n *Node) {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	heap.Push(ht.heap, n)
 }
 
-func (tm *Timer) Drain() interface{} {
-	if tm.Len() > 0 {
-		node := heap.Pop(tm.heap).(*Node)
-		return node.value
+func (ht *HeapTimer) pop() *Node {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	if ht.heap.Len() > 0 {
+		n := heap.Pop(ht.heap)
+		return n.(*Node)
 	}
 	return nil
 }
 
-func (tm *Timer) Push(val interface{}, t time.Time) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	node := &Node{value: val, tm: t}
-	heap.Push(tm.heap, node)
-	if head := tm.heap.Head(); head.tm.After(time.Now()) {
-		tm.timer.Reset(head.tm.Sub(time.Now()))
+func (ht *HeapTimer) Pop() (interface{}, bool) {
+	<-ht.serving.Done()
+	val, ok := <-ht.V
+	return val, ok
+}
+
+func (ht *HeapTimer) reschedule() {
+	ht.mu.Lock()
+	defer ht.mu.Unlock()
+	ht.putting = event.New()
+	if ht.ticker == nil {
+		ht.ticker = time.NewTicker(time.Second * 10)
+	}
+	if n := ht.heap.Head(); n != nil {
+		if time.Until(n.ExpireAt) > 0 {
+			ht.ticker.Reset(time.Until(n.ExpireAt))
+		} else {
+			ht.ticker.Reset(0)
+		}
 	}
 }
+func (ht *HeapTimer) Serve(ctx context.Context) error {
+	defer ht.stopped.Fire()
+	defer close(ht.V)
 
-func (tm *Timer) PushWithDuration(val interface{}, duration time.Duration) {
-	tm.Push(val, time.Now().Add(duration))
-}
-
-func (tm *Timer) Serve(ctx context.Context) (err error) {
-	defer close(tm.C) //close tm.C, make sure the chan closed
-	defer tm.stopped.Fire()
-	tm.serving.Fire()
+	ht.serving.Fire()
 	for {
+		ht.reschedule()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-tm.close:
+		case <-ht.close:
 			return nil
-		case _, ok := <-tm.timer.C:
-			if !ok { // timer closed
-				return nil
+		case <-ht.putting.Done():
+			continue
+		case <-ht.ticker.C:
+			if n := ht.pop(); n != nil {
+				ht.V <- n.Value
 			}
-			d := tm.duration
-			if nxt, ok := tm.next(); ok {
-				d = nxt
-			}
-			tm.timer.Reset(d)
 		}
 	}
 }
 
-func (tm *Timer) next() (time.Duration, bool) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	head := tm.heap.Head()
-	for head != nil && head.tm.Before(time.Now()) {
-		node := heap.Pop(tm.heap).(*Node)
-		//panic when tm.C closed
-		tm.C <- node.value
-		head = tm.heap.Head()
-	}
-	if head != nil {
-		return head.tm.Sub(time.Now()), true
-	}
-	return 0, false
+func (ht *HeapTimer) Serving() <-chan struct{} {
+	return ht.serving.Done()
 }
 
-func (tm *Timer) Serving() <-chan struct{} {
-	return tm.serving.Done()
-}
-
-func (tm *Timer) Close() <-chan struct{} {
-	if tm.serving.HasFired() {
-		close(tm.close)
-		return tm.stopped.Done()
+func (ht *HeapTimer) Close() <-chan struct{} {
+	if ht.serving.HasFired() {
+		close(ht.close)
+		return ht.stopped.Done()
 	}
 	return event.Done()
 }

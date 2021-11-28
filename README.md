@@ -16,6 +16,6 @@ timer.PushWithDuration(v3, time.Second * 3)
 
 v, ok := timer.Pop()
 //OR
-v, ok := <-timer.C
+v, ok := <-timer.V
 ````
 

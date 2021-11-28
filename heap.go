@@ -6,8 +6,8 @@ import (
 )
 
 type Node struct {
-	value interface{}
-	tm    time.Time
+	Value    interface{}
+	ExpireAt time.Time
 }
 
 type Heap []*Node
@@ -21,7 +21,7 @@ func NewHeap() *Heap {
 func (container Heap) Len() int { return len(container) }
 
 func (container Heap) Less(i, j int) bool {
-	return container[i].tm.Before(container[j].tm)
+	return container[i].ExpireAt.Before(container[j].ExpireAt)
 }
 
 func (container Heap) Swap(i, j int) {
