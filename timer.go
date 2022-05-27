@@ -74,6 +74,8 @@ func (ht *HeapTimer) reschedule() {
 	if n := ht.heap.Head(); n != nil {
 		if time.Until(n.ExpireAt) > 0 {
 			ht.ticker.Reset(time.Until(n.ExpireAt))
+		} else {
+			ht.ticker.Reset(time.Millisecond * 10)
 		}
 	}
 }
